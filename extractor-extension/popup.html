@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Facebook Post Extractor</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📰 Post Extractor Agent</h1>
+      <p class="subtitle">Extracted Posts & Articles</p>
+    </header>
+
+    <div class="stats">
+      <div class="stat-item">
+        <span class="stat-label">Total Posts:</span>
+        <span class="stat-value" id="totalPosts">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">With Images:</span>
+        <span class="stat-value" id="postsWithImages">0</span>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="refreshBtn" class="btn btn-primary">🔄 Refresh</button>
+      <button id="exportBtn" class="btn btn-success">📥 Export JSON</button>
+      <button id="clearBtn" class="btn btn-danger">🗑️ Clear All</button>
+    </div>
+
+    <div class="posts-container" id="postsContainer">
+      <div class="loading" id="loading">Loading posts...</div>
+    </div>
+
+    <div class="empty-state" id="emptyState" style="display: none;">
+      <p>No posts extracted yet.</p>
+      <p class="hint">Scroll through your Facebook feed to start extracting posts.</p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+

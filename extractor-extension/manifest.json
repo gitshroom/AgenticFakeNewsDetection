@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Facebook Post Extractor Agent",
+  "version": "1.0.0",
+  "description": "Extracts Facebook post content (text + images) for fake news detection pipeline",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://facebook.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.facebook.com/*",
+        "https://facebook.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
+
