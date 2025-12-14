@@ -7,23 +7,28 @@ Original file is located at
     https://colab.research.google.com/drive/13h3TY8t_2cPOAWSv1zJ2NGxFYIET2OZc
 """
 
-# ==========================================
-# Decision Maker for Claim Veracity Evaluation
-# ==========================================
+import json
+import os
+from typing import List, Optional, Any
 
-from typing import List, Optional
+# --- Configuration ---
+# Define the expected filename for the input JSON data.
+INPUT_FILENAME = "henrich_cheni.json"
+# Define the filename for the output JSON data.
+OUTPUT_FILENAME = "decision_summary.json"
+
+# ---------------------------------------------------
+## 📜 Core Data Classes (Modified: Removed Credibility)
 
 class Evidence:
     """
     Represents a single piece of evidence with its weighted characteristics.
     """
     def __init__(self,
-                 credibility: float,   # Ci
                  stance: int,          # Si ∈ {-1, 0, +1}
                  confidence: float,    # Confi
-                 quality: Optional[float] = 1.0,  # Qi (optional)
-                 recency_weight: Optional[float] = 1.0):  # wT (optional)
-        self.credibility = credibility
+                 quality: Optional[float] = 1.0,  # Qi
+                 recency_weight: Optional[float] = 1.0):  # wT
         self.stance = stance
         self.confidence = confidence
         self.quality = quality
@@ -31,15 +36,14 @@ class Evidence:
 
     def weighted_score(self) -> float:
         """
-        Compute the per-evidence weighted score:
-            Ei = Ci × Si × Confi × Qi × wT
+        Compute the per-evidence weighted score: Ei = Si × Confi × Qi × wT
+        (Credibility Ci is removed from the formula)
         """
-        return (self.credibility *
-                self.stance *
+        return (self.stance *
                 self.confidence *
                 self.quality *
                 self.recency_weight)
-
+# ---------------------------------------------------
 class DecisionMaker:
     """
     Aggregates evidence to compute a Claim Truth Score (CTS)
@@ -50,86 +54,145 @@ class DecisionMaker:
 
     def compute_cts(self) -> float:
         """
-        Compute the normalized Claim Truth Score (CTS):
-            CTS = Σ(Ei) / Σ(Ci)
+        Compute the Claim Truth Score (CTS): CTS = Σ(Ei)
+        (Normalization by Σ(Ci) is removed)
         """
+        # CTS is now the total sum of weighted scores (Ei)
         total_weighted = sum(e.weighted_score() for e in self.evidence_items)
-        total_credibility = sum(e.credibility for e in self.evidence_items)
-        if total_credibility == 0:
-            return 0.0
-        return total_weighted / total_credibility
+        return total_weighted
 
-    def decision(self) -> str:
+    def decision(self) -> tuple[str, float]:
         """
-        Translate CTS into discrete decisions:
-            - True: CTS ≥ +0.3 and ≥ 2 credible supports
-            - Fake: CTS ≤ −0.3 and ≥ 2 credible refutations
-            - Unknown: otherwise
+        Translate CTS into discrete decisions.
         """
         cts = self.compute_cts()
 
-        # Threshold for credible evidence (tunable)
-        credible_threshold = 0.6
-
-        # Count credible supports/refutations
-        supports = sum(1 for e in self.evidence_items
-                       if e.stance == +1 and e.credibility >= credible_threshold)
-        refutes = sum(1 for e in self.evidence_items
-                      if e.stance == -1 and e.credibility >= credible_threshold)
-
-        if cts >= 0.3 and supports >= 2:
+        # Simplified decision logic based only on score thresholds
+        if cts >= 0.3:
             verdict = "True"
-        elif cts <= -0.3 and refutes >= 2:
+        elif cts <= -0.3:
             verdict = "Fake"
         else:
             verdict = "Unknown"
 
         return verdict, cts
 
-# ==========================================
-# Example Usage
-# ==========================================
+# ---------------------------------------------------
+## 📖 JSON Reading and Parsing Functions
+
+def read_evidence_data(filename: str) -> List[Any]:
+    """
+    Reads and parses a JSON file containing the evidence list.
+    MODIFIED: Expects the evidence list directly at the root level.
+    """
+    if not os.path.exists(filename):
+        print(f"❌ ERROR: The input file '{filename}' was not found.")
+        return []
+
+    try:
+        with open(filename, 'r') as file:
+            data = json.load(file)
+
+            # Check if the root element is a list
+            if isinstance(data, list):
+                print(f"✅ Input read successfully from '{filename}'.")
+                return data
+            else:
+                print(f"❌ ERROR: Root element of JSON must be a list of evidence records.")
+                return []
+
+    except json.JSONDecodeError as e:
+        print(f"❌ ERROR: Failed to parse JSON data in '{filename}'. Check file format. Error: {e}")
+        return []
+    except Exception as e:
+        print(f"❌ General File Error: {e}")
+        return []
+
+def parse_evidence_records(records: List[Any]) -> List[Evidence]:
+    """
+    Converts a list of raw dictionaries into a list of Evidence objects.
+    (Removed access to Source Credibility)
+    """
+    evidence_list = []
+
+    # Mapping the string stance from JSON to the required integer stance for the Evidence class
+    stance_map = {"support": 1, "neutral": 0, "contradiction": -1}
+
+    for record in records:
+        try:
+            # We must map the string stance from the JSON to the integer stance
+            raw_stance = record.get("Predicted Stance", "neutral").lower()
+
+            new_evidence = Evidence(
+                # Removed credibility = record["Source Credibility"],
+                stance = stance_map.get(raw_stance, 0), # Default to 0 (Neutral) if stance is missing/invalid
+                confidence = record["Model Confidence"],
+                quality = record.get("Quality Score", 1.0),
+                recency_weight = record.get("Recency Weight", 1.0)
+            )
+            evidence_list.append(new_evidence)
+
+        except KeyError as e:
+            # The only expected KeyError now is if "Model Confidence" or "Predicted Stance" is missing
+            print(f"⚠️ Warning: Skipping evidence record due to missing required key: {e}. Check for 'Model Confidence' or 'Predicted Stance'.")
+        except TypeError as e:
+            print(f"⚠️ Warning: Skipping evidence record due to invalid data type: {e}")
+
+    return evidence_list
+
+# ---------------------------------------------------
+## 💾 JSON Output Writer Function (NEW)
+
+def write_decision_to_file(decision_summary: dict, filename: str):
+    """
+    Writes the final decision dictionary to a specified JSON file.
+    """
+    try:
+        with open(filename, 'w') as file:
+            json.dump(decision_summary, file, indent=4)
+        print(f"✅ Decision successfully written to '{filename}'.")
+    except Exception as e:
+        print(f"❌ Error writing output file: {e}")
+
+# ---------------------------------------------------
+## 🚀 Main Execution Block
 
 if __name__ == "__main__":
-    # Example concrete inputs
-    evidence_list = [
-        Evidence(credibility=0.9, stance=+1, confidence=0.8, quality=0.9, recency_weight=1.0),
-        Evidence(credibility=0.7, stance=+1, confidence=0.6, quality=0.8, recency_weight=0.9),
-        Evidence(credibility=0.8, stance=-1, confidence=0.7, quality=1.0, recency_weight=0.8)
-    ]
 
-    decision_maker = DecisionMaker(evidence_list)
-    verdict, cts = decision_maker.decision()
+    print(f"Starting Decision Maker with input file: {INPUT_FILENAME}")
 
-    print(f"Claim Truth Score (CTS): {cts:.3f}")
-    print(f"Final Decision: {verdict}")
+    # 1. Read the JSON file and extract the records list
+    raw_evidence_records = read_evidence_data(INPUT_FILENAME)
 
-verdict, cts = decision_maker.decision()
+    if not raw_evidence_records:
+        print("🛑 Exiting due to no valid evidence data.")
+        exit(1)
 
-# Store decision output in a temporary JSON variable
-decision_json = {
-    "verdict": verdict,
-    "claim_truth_score": round(cts, 4),
-    "decision_thresholds": {
-        "true_threshold": 0.3,
-        "fake_threshold": -0.3,
-        "credible_source_threshold": 0.6,
-        "minimum_sources": 2
-    },
-    "model_info": {
-        "model_name": "Evidence-Weighted Decision Maker",
-        "formula": "CTS = Σ(Ci × Si × Confi × Qi × wT) / Σ(Ci)",
-        "version": "1.0"
+    # 2. Parse the records into Evidence objects
+    evidence_objects = parse_evidence_records(raw_evidence_records)
+
+    if not evidence_objects:
+        print("🛑 Exiting due to no valid Evidence objects created.")
+        exit(1)
+
+    # 3. Run the Decision Maker Model
+    decision_maker = DecisionMaker(evidence_objects)
+    final_verdict, cts = decision_maker.decision()
+
+    # 4. Construct Output Summary
+    final_decision_summary = {
+        "verdict": final_verdict,
+        "claim_truth_score": round(cts, 4),
+        "evidence_count": len(evidence_objects),
+        "input_file": INPUT_FILENAME
     }
-}
 
-# Try appending if claim_json exists
-if "claim_json" in globals():
-    claim_json["decision"] = decision_json
-    print("Decision appended to claim_json.")
-else:
-    print("claim_json not found — decision stored in variable `decision_json` only.")
+    # 5. Console Output
+    print("\n--- Final Claim Veracity Decision ---")
+    print(f"Total Evidence Items Processed: {len(evidence_objects)}")
+    print(f"Claim Truth Score (CTS): {cts:.4f}")
+    print(f"Final Decision: **{final_verdict.upper()}**")
+    print("-------------------------------------")
 
-import json
-
-print(json.dumps(decision_json, indent=2))
+    # 6. Write Result to JSON File
+    write_decision_to_file(final_decision_summary, OUTPUT_FILENAME)
